@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
+
+<configuration>
+    <!-- تحديد العنوان الرئيسي ديال الـ NameNode و الـ IPC Port اللي كيخلي الكلاستر يتواصل بيناتو -->
+    <property>
+        <name>fs.defaultFS</name>
+        <value>hdfs://namenode:9000</value>
+    </property>
+
+    <!-- إعدادات التخزين المؤقت المتاحة للـ Hadoop (Buffer Size) -->
+    <property>
+        <name>io.file.buffer.size</name>
+        <value>131072</value>
+    </property>
+</configuration>

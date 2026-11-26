@@ -1,0 +1,218 @@
+services:
+  namenode:
+    image: bde2020/hadoop-namenode:${HADOOP_VERSION}
+    container_name: namenode
+    restart: always
+    networks:
+      - hadoop
+    ports:
+      - "${NAMENODE_WEB_PORT}:9870"
+      - "${NAMENODE_IPC_PORT}:9000"
+    env_file:
+      - .env
+    volumes:
+      - hadoop_namenode:/hadoop/dfs/name
+      - ./data:/data
+
+  datanode:
+    image: bde2020/hadoop-datanode:${HADOOP_VERSION}
+    container_name: datanode
+    restart: always
+    networks:
+      - hadoop
+    depends_on:
+      - namenode
+    env_file:
+      - .env
+    environment:
+      - SERVICE_PRECONDITION=namenode:${NAMENODE_WEB_PORT}
+    volumes:
+      - hadoop_datanode:/hadoop/dfs/data
+
+  resourcemanager:
+    image: bde2020/hadoop-resourcemanager:${HADOOP_VERSION}
+    container_name: resourcemanager
+    restart: always
+    networks:
+      - hadoop
+    ports:
+      - "${RESOURCEMANAGER_PORT}:8088"
+    depends_on:
+      - namenode
+      - datanode
+    env_file:
+      - .env
+    environment:
+      - SERVICE_PRECONDITION=namenode:${NAMENODE_IPC_PORT} namenode:${NAMENODE_WEB_PORT} datanode:9864
+
+  nodemanager:
+    image: bde2020/hadoop-nodemanager:${HADOOP_VERSION}
+    container_name: nodemanager
+    restart: always
+    networks:
+      - hadoop
+    depends_on:
+      - resourcemanager
+    env_file:
+      - .env
+    environment:
+      - SERVICE_PRECONDITION=namenode:${NAMENODE_IPC_PORT} namenode:${NAMENODE_WEB_PORT} datanode:9864 resourcemanager:${RESOURCEMANAGER_PORT}
+
+  historyserver:
+    image: bde2020/hadoop-historyserver:${HADOOP_VERSION}
+    container_name: historyserver
+    restart: always
+    networks:
+      - hadoop
+    ports:
+      - "${HISTORYSERVER_PORT}:8188"
+    depends_on:
+      - namenode
+      - datanode
+    env_file:
+      - .env
+    environment:
+      - SERVICE_PRECONDITION=namenode:${NAMENODE_IPC_PORT} namenode:${NAMENODE_WEB_PORT} datanode:9864 resourcemanager:${RESOURCEMANAGER_PORT}
+    volumes:
+      - hadoop_historyserver:/hadoop/yarn/timeline
+
+
+
+  # ==========================================
+  # 🐝 APACHE HIVE ECOSYSTEM ADDITIONS
+  # ==========================================
+
+  hive-metastore-postgresql:
+    image: bde2020/hive-metastore-postgresql:2.3.0
+    container_name: hive-metastore-postgresql
+    restart: always
+    networks:
+      - hadoop
+    volumes:
+      - hive_metastore_db:/var/lib/postgresql/data
+
+  hive-metastore:
+    image: bde2020/hive:2.3.2-postgresql-metastore
+    container_name: hive-metastore
+    restart: always
+    networks:
+      - hadoop
+    env_file:
+      - .env
+    environment:
+      - SERVICE_PRECONDITION=namenode:${NAMENODE_IPC_PORT} namenode:${NAMENODE_WEB_PORT} datanode:9864 hive-metastore-postgresql:5432
+    command: /opt/hive/bin/hive --service metastore
+    depends_on:
+      - namenode
+      - datanode
+      - hive-metastore-postgresql
+    ports:
+      - "9083:9083"
+
+  hive-server:
+    image: bde2020/hive:2.3.2-postgresql-metastore
+    container_name: hive-server
+    restart: always
+    networks:
+      - hadoop
+    env_file:
+      - .env
+    environment:
+      - SERVICE_PRECONDITION=hive-metastore:9083
+    depends_on:
+      - hive-metastore
+    ports:
+      - "10000:10000"
+      - "10002:10002"
+
+  kafka-1:
+    image: apache/kafka:${KAFKA_VERSION}
+    container_name: kafka-1
+    restart: unless-stopped
+    networks:
+      - hadoop
+    ports:
+      - "${KAFKA_1_EXTERNAL_PORT}:9092"
+    env_file:
+      - .env
+    environment:
+      KAFKA_NODE_ID: "${KAFKA_1_NODE_ID}"
+      KAFKA_PROCESS_ROLES: "${KAFKA_PROCESS_ROLES}"
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "${KAFKA_CONTROLLER_QUORUM_VOTERS}"
+      KAFKA_CLUSTER_ID: "${KAFKA_CLUSTER_ID}"
+      KAFKA_LISTENERS: "${KAFKA_LISTENERS}"
+      KAFKA_ADVERTISED_LISTENERS: "${KAFKA_1_ADVERTISED_LISTENERS}"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "${KAFKA_LISTENER_SECURITY_PROTOCOL_MAP}"
+      KAFKA_INTER_BROKER_LISTENER_NAME: "${KAFKA_INTER_BROKER_LISTENER_NAME}"
+      KAFKA_CONTROLLER_LISTENER_NAMES: "${KAFKA_CONTROLLER_LISTENER_NAMES}"
+      KAFKA_LOG_DIRS: "${KAFKA_LOG_DIRS}"
+      KAFKA_HEAP_OPTS: "${KAFKA_HEAP_OPTS}"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "${KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR}"
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "${KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR}"
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "${KAFKA_TRANSACTION_STATE_LOG_MIN_ISR}"
+      KAFKA_DEFAULT_REPLICATION_FACTOR: "${KAFKA_DEFAULT_REPLICATION_FACTOR}"
+      KAFKA_MIN_INSYNC_REPLICAS: "${KAFKA_MIN_INSYNC_REPLICAS}"
+      KAFKA_NUM_PARTITIONS: "${KAFKA_NUM_PARTITIONS}"
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: "${KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS}"
+    volumes:
+      - kafka_1_data:${KAFKA_LOG_DIRS}
+    mem_limit: ${KAFKA_MEM_LIMIT}
+    cpus: ${KAFKA_CPUS}
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:${KAFKA_INTERNAL_PORT} >/dev/null 2>&1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  kafka-2:
+    image: apache/kafka:${KAFKA_VERSION}
+    container_name: kafka-2
+    restart: unless-stopped
+    networks:
+      - hadoop
+    ports:
+      - "${KAFKA_2_EXTERNAL_PORT}:9092"
+    env_file:
+      - .env
+    environment:
+      KAFKA_NODE_ID: "${KAFKA_2_NODE_ID}"
+      KAFKA_PROCESS_ROLES: "${KAFKA_PROCESS_ROLES}"
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "${KAFKA_CONTROLLER_QUORUM_VOTERS}"
+      KAFKA_CLUSTER_ID: "${KAFKA_CLUSTER_ID}"
+      KAFKA_LISTENERS: "${KAFKA_LISTENERS}"
+      KAFKA_ADVERTISED_LISTENERS: "${KAFKA_2_ADVERTISED_LISTENERS}"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "${KAFKA_LISTENER_SECURITY_PROTOCOL_MAP}"
+      KAFKA_INTER_BROKER_LISTENER_NAME: "${KAFKA_INTER_BROKER_LISTENER_NAME}"
+      KAFKA_CONTROLLER_LISTENER_NAMES: "${KAFKA_CONTROLLER_LISTENER_NAMES}"
+      KAFKA_LOG_DIRS: "${KAFKA_LOG_DIRS}"
+      KAFKA_HEAP_OPTS: "${KAFKA_HEAP_OPTS}"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "${KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR}"
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "${KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR}"
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "${KAFKA_TRANSACTION_STATE_LOG_MIN_ISR}"
+      KAFKA_DEFAULT_REPLICATION_FACTOR: "${KAFKA_DEFAULT_REPLICATION_FACTOR}"
+      KAFKA_MIN_INSYNC_REPLICAS: "${KAFKA_MIN_INSYNC_REPLICAS}"
+      KAFKA_NUM_PARTITIONS: "${KAFKA_NUM_PARTITIONS}"
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: "${KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS}"
+    volumes:
+      - kafka_2_data:${KAFKA_LOG_DIRS}
+    mem_limit: ${KAFKA_MEM_LIMIT}
+    cpus: ${KAFKA_CPUS}
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:${KAFKA_INTERNAL_PORT} >/dev/null 2>&1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+volumes:
+  hadoop_namenode:
+  hadoop_datanode:
+  hadoop_historyserver:
+  hive_metastore_db:
+  kafka_1_data:
+  kafka_2_data:
+
+networks:
+  hadoop:
+    name: ${HADOOP_DOCKER_NETWORK}
